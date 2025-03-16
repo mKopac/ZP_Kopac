@@ -1,22 +1,10 @@
 const { execSync } = require('child_process');
 
-const tool = 'eslint'; 
-const filePath = '1.js';
-
-let command = '';
-
-if (tool === 'prettier') {
-    command = `prettier --write ${filePath}`;
-} else if (tool === 'eslint') {
-    command = `eslint --fix ${filePath}`;
-} else if (tool === 'standard') {
-    command = `standard --fix ${filePath}`;
-} else if (tool === 'js-beautify') {
-    command = `js-beautify -r ${filePath}`;
-} else {
-    console.error('Unsupported formatting tool specified.');
-    process.exit(1);
-}
+command = `prettier --write 1.js`;
+// prettier --write 1.js
+// eslint --fix 1.js
+// standard --fix 1.js
+// js-beautify -r 1.js
 
 const startTime = Date.now();
 

@@ -11,8 +11,8 @@ public class Test {
         ProcessBuilder pb = new ProcessBuilder(
                 "java",
                 "-jar",
-                "C:\\Users\\marti\\Desktop\\UKF\\Baklažánka\\Kódy\\google-java-format-1.25.2-all-deps.jar",
-                "C:\\Users\\marti\\eclipse-workspace\\Testing\\bin\\testing\\P1.class"
+                "Path_to_jar",
+                "Path_to_class"
             );
 
         Process process = pb.start();
