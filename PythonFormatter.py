@@ -33,11 +33,9 @@ def process_block(lines, start_index, parent_indent):
         if lines[i].strip() == "":
             i += 1
             continue
-
         current_indent = count_leading_spaces(lines[i])
         if current_indent < marker:
             break
-
         relative = current_indent - marker
         new_indent = block_base + relative
         lines[i] = " " * new_indent + lines[i].lstrip(' ')
@@ -46,6 +44,64 @@ def process_block(lines, start_index, parent_indent):
         else:
             i += 1
     return i
+
+
+def fix_first_line_after_colon(lines):
+    """
+    For every line that ends with a colon (":"),
+    check the next non-empty line. If its indent is less than or equal to the parent's indent,
+    reindent that line to (parent's indent + 4). Otherwise, leave it as is.
+    """
+    new_lines = list(lines)
+    for i in range(len(new_lines) - 1):
+        if new_lines[i].rstrip().endswith(":"):
+            parent_indent = count_leading_spaces(new_lines[i])
+            j = i + 1
+            while j < len(new_lines) and new_lines[j].strip() == "":
+                j += 1
+            if j < len(new_lines):
+                next_indent = count_leading_spaces(new_lines[j])
+                if next_indent <= parent_indent:
+                    new_lines[j] = " " * (parent_indent + 4) + new_lines[j].lstrip()
+    return new_lines
+
+
+def normalize_sibling_indentation(lines, tolerance=2):
+    """
+    Normalizes the indentation of sibling lines within a block.
+
+    For any block header (a line ending with a colon) that does NOT start with "def ",
+    this function finds the first non-empty line (the marker) and then for subsequent lines in that block
+    (i.e. lines with indent greater than the header) until a line with indent <= parent's indent is encountered,
+    if a line's indent is within 'tolerance' spaces of the marker, it is set to exactly the marker's indent.
+
+    Lines that have the same indentation as the parent are not modified.
+    """
+    new_lines = list(lines)
+    i = 0
+    while i < len(new_lines) - 1:
+        if new_lines[i].rstrip().endswith(":") and not new_lines[i].lstrip().startswith("def "):
+            parent_indent = count_leading_spaces(new_lines[i])
+            j = i + 1
+            while j < len(new_lines) and new_lines[j].strip() == "":
+                j += 1
+            if j < len(new_lines):
+                marker_indent = count_leading_spaces(new_lines[j])
+                k = j + 1
+                while k < len(new_lines):
+                    if new_lines[k].strip() == "":
+                        k += 1
+                        continue
+                    current_indent = count_leading_spaces(new_lines[k])
+                    if current_indent <= parent_indent:
+                        break
+                    if abs(current_indent - marker_indent) <= tolerance:
+                        new_lines[k] = " " * marker_indent + new_lines[k].lstrip(' ')
+                    k += 1
+            i = k
+        else:
+            i += 1
+    return new_lines
 
 
 def reindent_lines(lines):
@@ -85,70 +141,14 @@ def collapse_inner_spaces(lines):
     return new_lines
 
 
-def find_break_index(line, max_length):
-    """
-    Finds the rightmost dot in the entire line that is not within a string literal
-    and occurs before max_length.
-    Returns the index of that dot if found, or -1 if not.
-    """
-    positions = []
-    in_single = False
-    in_double = False
-    escape = False
-    for i, c in enumerate(line):
-        if escape:
-            escape = False
-            continue
-        if c == '\\':
-            escape = True
-            continue
-        if c == "'" and not in_double:
-            in_single = not in_single
-        elif c == '"' and not in_single:
-            in_double = not in_double
-        if not in_single and not in_double and c == '.':
-            positions.append(i)
-    valid_positions = [pos for pos in positions if pos < max_length]
-    if valid_positions:
-        return max(valid_positions)
-    return -1
-
-
-def break_long_line(line, max_length=79):
-    """
-    Breaks a long line into multiple lines if it exceeds max_length.
-    The break is attempted at the rightmost dot ('.') outside of string literals that is before max_length.
-    The first part ends with the dot; the remainder is placed on a new line indented with the original indent + 4.
-    Recursively applies until the entire line is within max_length.
-    """
-    if len(line) <= max_length:
-        return [line]
-
-    match = re.match(r'^(\s*)', line)
-    indent = match.group(1) if match else ""
-
-    break_index = find_break_index(line, max_length)
-    if break_index == -1:
-        break_index = max_length - 1
-
-    first_part = line[:break_index + 1].rstrip()
-    remainder = line[break_index + 1:].lstrip()
-
-    new_indent = indent + "    "
-    remainder_line = new_indent + remainder
-    broken_remainder = break_long_line(remainder_line, max_length)
-    return [first_part] + broken_remainder
-
-
 def insert_empty_line_after_function(lines):
     """
     Inserts an empty line after the end of a function block.
 
-    Heuristic:
-      - When a line starts with 'def ' (after leading whitespace), record its indent.
-      - All lines following that are part of the function block have a greater indent.
-      - When a non-empty line is encountered with an indent less than or equal to the function declaration,
-        assume the function block has ended and insert an empty line before that line if one isn't already present.
+    - When a line starts with 'def ' (ignoring leading whitespace), record its indent.
+    - All lines following that are part of the function block have a greater indent.
+    - When a non-empty line is encountered with an indent less than or equal to the function declaration,
+      assume the function block has ended and insert an empty line before that line if one isn't already present.
     """
     new_lines = []
     current_func_indent = None
@@ -166,8 +166,7 @@ def insert_empty_line_after_function(lines):
                 if next_line.strip() != "":
                     next_indent = count_leading_spaces(next_line)
                     if next_indent <= current_func_indent:
-                        if new_lines and new_lines[-1].strip() != "":
-                            new_lines.append("")
+                        new_lines.append("")
                         in_function = False
                         current_func_indent = None
     return new_lines
@@ -179,6 +178,9 @@ def format_code(code):
       - Replaces tabs with 4 spaces
       - Trims trailing whitespace
       - Adjusts indentation using reindent_lines() (recursive adjustment for nested blocks)
+      - Fixes the first line after any colon to be (parent indent + 4)
+      - Normalizes sibling lines within blocks to match the indent of the first child (if within tolerance),
+        but leaves lines with the same indent as the parent untouched.
       - Applies spacing rules for common operators
       - Adds a whitespace after commas
       - Collapses multiple spaces in the content (without altering leading indentation)
@@ -190,6 +192,8 @@ def format_code(code):
     if lines and lines[-1] != "":
         lines.append("")
 
+    lines = fix_first_line_after_colon(lines)
+    lines = normalize_sibling_indentation(lines)
     lines = reindent_lines(lines)
     code = "\n".join(lines)
 
@@ -200,14 +204,7 @@ def format_code(code):
     lines = code.splitlines()
     lines = collapse_inner_spaces(lines)
 
-    final_lines = []
-    for line in lines:
-        if len(line) > 79:
-            broken = break_long_line(line, 79)
-            final_lines.extend(broken)
-        else:
-            final_lines.append(line)
-
+    final_lines = lines[:]
     final_lines = insert_empty_line_after_function(final_lines)
 
     code = "\n".join(final_lines)
@@ -221,9 +218,10 @@ def main():
     The main() function handles:
       - Reading the file from the given filename
       - Checking for IndentationError by attempting to compile the code.
-      - If an IndentationError is detected, prompting the user to attempt to fix it using fix_indent_syntax().
+      - If an IndentationError is detected, prompting the user to attempt to fix it.
       - Otherwise, calling format_code() to process the content.
       - Writing the formatted code back to the file.
+      - Measuring and displaying the total processing time.
     """
     if len(sys.argv) != 2:
         print("Usage: python simple_formatter.py <filename>")
@@ -242,7 +240,7 @@ def main():
     try:
         with open(filename, "w", encoding="utf-8") as f:
             f.write(formatted_code)
-        print("Formatting applied successfully.")
+        print("Formatting applied successfully")
     except Exception as e:
         print("Error writing file:", e)
         sys.exit(1)
